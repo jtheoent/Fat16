@@ -63,7 +63,7 @@ STATIC_NOINLINE bool waitForToken(uint8_t token, uint16_t timeoutMillis) {
 //==============================================================================
 // SdCard member functions
 //------------------------------------------------------------------------------
-uint8_t SdCard::cardCommand(uint8_t cmd, uint32_t arg) {
+uint8_t SdCard::cardCommandCRC(uint8_t cmd, uint32_t arg, uint8_t crc) {
   uint8_t r1;
 
   // select card
@@ -79,13 +79,22 @@ uint8_t SdCard::cardCommand(uint8_t cmd, uint32_t arg) {
   for (int8_t s = 24; s >= 0; s -= 8) spiSend(arg >> s);
 
   // send CRC - must send valid CRC for CMD0
-  spiSend(cmd == CMD0 ? 0x95 : 0XFF);
+  spiSend(crc);
 
   // wait for not busy
   for (uint8_t retry = 0; (0X80 & (r1 = spiRec())) && retry != 0XFF; retry++);
   return r1;
 }
 //------------------------------------------------------------------------------
+uint8_t SdCard::cardAcmdCRC(uint8_t cmd, uint32_t arg, uint8_t crc) {
+  cardCommand(CMD55, 0);
+  return cardCommandCRC(cmd, arg, crc);
+}
+//------------------------------------------------------------------------------
+uint8_t SdCard::cardCommand(uint8_t cmd, uint32_t arg) {
+  return cardCommandCRC(cmd, arg, 0xFF);
+}
+
 uint8_t SdCard::cardAcmd(uint8_t cmd, uint32_t arg) {
   cardCommand(CMD55, 0);
   return cardCommand(cmd, arg);
@@ -167,21 +176,34 @@ bool SdCard::begin(uint8_t chipSelect, uint8_t sckDivisor) {
   digitalWrite(chipSelectPin_, LOW);
 
   // command to go idle in SPI mode
-  while ((r = cardCommand(CMD0, 0)) != R1_IDLE_STATE) {
+  while ((r = cardCommandCRC(CMD0, 0, 0x95)) != R1_IDLE_STATE) {
     if (((uint16_t)millis() - t0) > SD_INIT_TIMEOUT) {
       error(SD_ERROR_CMD0, r);
       return false;
     }
   }
 #if USE_ACMD41
+  blockbits = 0;
+  while ((r = cardCommandCRC(CMD8, 0x000001AA, 0x87)) != R1_IDLE_STATE) {
+    if (((uint16_t)millis() - t0) > SD_INIT_TIMEOUT) {
+      error(SD_ERROR_CMD8, r);
+      return false;
+    }
+  }
+  spiRec();
+  spiRec();
+  spiRec();
+  spiRec();
+
   // start initialization and wait for completed initialization
-  while ((r = cardAcmd(ACMD41, 0)) != R1_READY_STATE) {
+  while ((r = cardAcmdCRC(ACMD41, 0x40100000, 0xCD)) != R1_READY_STATE) {
     if (((uint16_t)millis() - t0) > SD_INIT_TIMEOUT) {
       error(SD_ERROR_ACMD41, r);
       return false;
     }  
   }
 #else  // USE_ACMD41
+  blockbits = 9;
   // use CMD1 to initialize the card - works with MMC and some SD cards
   while ((r = cardCommand(CMD1, 0)) != R1_READY_STATE) {
     if (((uint16_t)millis() - t0) > SD_INIT_TIMEOUT) {
@@ -203,7 +225,7 @@ bool SdCard::begin(uint8_t chipSelect, uint8_t sckDivisor) {
  * the value zero, false, is returned for failure.
  */
 bool SdCard::readBlock(uint32_t blockNumber, uint8_t* dst) {
-  if (cardCommand(CMD17, blockNumber << 9)) {
+  if (cardCommand(CMD17, blockNumber << blockbits)) {
     error(SD_ERROR_CMD17);
     return false;
   }
@@ -247,7 +269,7 @@ bool SdCard::readTransfer(uint8_t* dst, uint16_t count) {
  * the value zero, false, is returned for failure.
  */
 bool SdCard::writeBlock(uint32_t blockNumber, const uint8_t* src) {
-  uint32_t address = blockNumber << 9;
+  uint32_t address = blockNumber << blockbits;
 
   if (cardCommand(CMD24, address)) {
     error(SD_ERROR_CMD24);

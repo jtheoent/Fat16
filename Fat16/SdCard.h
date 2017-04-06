@@ -47,6 +47,7 @@ uint8_t const SD_ERROR_BLOCK_ZERO_WRITE  = 0X8;
 uint8_t const SD_ERROR_WRITE_PROGRAMMING = 0X9;
 /** card fialed to initialize with CMD1*/
 uint8_t const SD_ERROR_CMD1              = 0XA;
+uint8_t const SD_ERROR_CMD8              = 0XB;
 //------------------------------------------------------------------------------
 /**
  * \class SdCard
@@ -58,6 +59,7 @@ uint8_t const SD_ERROR_CMD1              = 0XA;
 class SdCard  {
  public:
   /** Code for a SD error. See SdCard.h for definitions. */
+  uint8_t blockbits;
   uint8_t errorCode;
   /** Data that may be helpful in determining the cause of an error */
   uint8_t errorData;
@@ -110,6 +112,8 @@ class SdCard  {
   bool writeBlock(uint32_t block, const uint8_t* src);
  private:
   uint8_t cardAcmd(uint8_t cmd, uint32_t arg);
+  uint8_t cardAcmdCRC(uint8_t cmd, uint32_t arg, uint8_t crc);
+  uint8_t cardCommandCRC(uint8_t cmd, uint32_t arg, uint8_t);
   uint8_t cardCommand(uint8_t cmd, uint32_t arg);
   uint8_t chipSelectPin_;
   uint8_t sckDivisor_;
